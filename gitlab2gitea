@@ -1,0 +1,112 @@
+import requests
+
+GITLAB_TOKEN = 'glpat-xxxxxx-xxxxx'
+GITLAB_NAME = 'xxxxxx@outlook.com'
+GITLAB_GROUP_NAME = 'groups-name'    # only support 1 layer
+GITLAB_IP = 'https://gitlab.com'
+
+GITEA_IP = 'http://xxx.xxx.xxx.xxx:3002'
+GITEA_TOKEN = ''
+
+
+class Gitea():
+    def __init__(self, url, token=''):
+        self.url = url + '/api/v1'
+        self.header = {'Authorization': f'token {token}', 'content-Type': 'application/json'}
+        self.gitlab_token = ''
+        self.gitlab_username = ''
+
+        pass
+
+    def get_organization(self):
+        page = 0
+        limit = 100
+        resp = requests.get(self.url + '/orgs' + f'?page={page}&limit={limit}', headers=self.header)
+        return resp.json()
+
+    def create_organization(self, name=''):
+        data = {
+            # 'full_name': name,
+            'visibility': 'private',
+            'username': name,
+        }
+        resp = requests.post(self.url + '/orgs', headers=self.header, json=data)
+        print(f"create org: {resp.status_code=}, {resp.text} ")
+
+        return resp.json()
+
+    def set_gitlab_token(self, user, token):
+        self.gitlab_username = user
+        self.gitlab_token = token
+
+    def migrate_gitlab_repo(self, url='', repoName='', group='', description=''):
+        data = {
+            "clone_addr": url,
+            "repo_name": repoName,
+            "auth_password": self.gitlab_token,
+            # "auth_token": token,
+            "auth_username": self.gitlab_username,
+            "description": description,
+            "issues": False,
+            "labels": False,
+            "milestones": False,
+            "mirror": True,
+            "private": True,
+            "repo_owner": group,
+            # "pull_requests": "<boolean>",
+            # "releases": "<boolean>",
+            # "service": "<string>",
+            # "uid": "1",
+            # "wiki": "<boolean>"
+        }
+        resp = requests.post(self.url + '/repos/migrate', headers=self.header, json=data)
+        print(f"migrate resp: {resp.status_code}, {resp.text=} ")
+        pass
+
+
+class GitLab():
+    def __init__(self, url, token=''):
+        self.url = url + '/api/v4'
+        self.token = token
+        self.header = {'PRIVATE-TOKEN': self.token}
+        pass
+
+    def get_groups(self):
+        data = {}
+        resp = requests.get(self.url + '/groups', headers=self.header, data=data)
+        return resp.json()
+
+    def get_projects(self, gpId=0) -> {}:
+        # curl - -header       "PRIVATE-TOKEN: <your_private_token>" "<your_gitlab_instance>/api/v4/groups/your_group_id/projects"
+        resp = requests.get(self.url + f'/groups/{gpId}/projects', headers=self.header)
+        return resp.json()
+
+
+def main():
+    gitlab = GitLab(GITLAB_IP, token=GITLAB_TOKEN)
+
+    gitea = Gitea(GITEA_IP, token=GITEA_TOKEN)
+    gitea.set_gitlab_token(GITLAB_NAME, token=GITLAB_TOKEN)
+
+    data = gitlab.get_groups()
+
+    # filter
+    parentId = list(filter(lambda x: x['path'] == GITLAB_GROUP_NAME, data))[0]['id']
+    print(f"parentid: {parentId=} ")
+    data = filter(lambda x: x['parent_id'] == parentId, data)
+
+    for x in data:
+        print(f"group:  {x['web_url']} ")
+
+        # get all projects, description,
+        # http_url_to_repo,  name,  y['namespace']['path']
+        resp = gitlab.get_projects(x['id'])
+        for y in resp:
+            print(f"  project: {y['id'], y['name'], y['http_url_to_repo']} ")
+            gitea.migrate_gitlab_repo(y['http_url_to_repo'], y['name'], y['namespace']['path'])
+
+    pass
+
+
+if __name__ == '__main__':
+    main()
